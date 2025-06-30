@@ -14,5 +14,7 @@ upper(OWNER_PAN) OWNER_PAN
 from prod_curated.oms_public.driver_enrollment_details where upper(OWNER_PAN)='DJEPA5104F' ;
 
 
-select upper(VEHICLE_REGISTRATION_NUMBER) RC_Number,count(driver_id) drvrs, count( distinct driver_id) uniq,drvrs-uniq diff
+---- check mapping type RC X Driver Do 1 Rc has 1 driver or many ?
+select upper(VEHICLE_REGISTRATION_NUMBER) RC_Number,
+count(driver_id) drvrs, count( distinct driver_id) uniq,drvrs-uniq diff
 from prod_curated.oms_public.driver_enrollment_details group by 1 order by 2 desc;
