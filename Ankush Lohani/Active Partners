@@ -1,0 +1,79 @@
+With T1 as (
+Select Date_trunc({{Period}},order_date) as order_date, geo_region_id, vehicle_category, LEVEL0_MAPPING, vehicle_id,
+Sum(demand) as demand,
+Median(demand) as avg_demand
+From (
+Select date_trunc('Day',to_timestamp(o.pickup_time) + interval '5hours, 30minutes') as order_date,
+o.geo_region_id ,
+v.vehicle_category,
+o.vehicle_id,
+v.LEVEL0_MAPPING,
+count(case when o.status = 4 then o.order_id end) as demand
+from prod_curated.oms_public.orders o  
+left join prod_curated.trucks.vehicle_segment_mapping_v2 v
+on v.vehicle_id = o.vehicle_id
+where
+o.deleted_at is NULL
+and o.order_type = 0
+and Date(TO_TIMESTAMP(o.PICKUP_TIME)+interval '5hours , 30 minutes') >= {{Start_Date}}
+and Date(TO_TIMESTAMP(o.PICKUP_TIME)+interval '5hours , 30 minutes') <= {{End_Date}}
+and v.LEVEL0_MAPPING = 'Micro LCV'
+
+--and hour((o.created_at)  + interval '5hours, 30minutes') between 9 and 21
+group by 1,2,3,4,5
+order by 1
+) group by 1,2,3,4,5)
+,
+T2 as (
+select date_trunc({{Period}},login_date) as period,
+geo_region_id,
+vehicle_id,
+vehicle_category,
+LEVEL0_MAPPING,
+count(distinct driver_id) as active_partners,
+median(dap) as dap
+from (
+select dld.login_date,
+di.geo_region_id,di.vehicle_id,
+vsm.vehicle_category,
+vsm.LEVEL0_MAPPING,
+di.driver_id,
+count(distinct dld.driver_id) over(partition by login_date,di.geo_region_id,vehicle_category,di.vehicle_id) as dap
+from prod_curated.trucks.driver_login_data dld 
+-- left join prod_curated.trucks.driver_daily_billedtime ddbt 
+-- on dld.driver_id=ddbt.driver_id
+-- and dld.login_date=ddbt.order_date
+join prod_curated.trucks.driver_info di 
+on dld.driver_id=di.driver_id 
+join prod_curated.trucks.vehicle_segment_mapping_v2 vsm 
+on di.vehicle_id=vsm.vehicle_id 
+where dld.login_date >= {{Start_Date}} and dld.login_date <= {{End_Date}}
+and vsm.vehicle_category<>'2W'
+and dld.total_business_login_time>=0.5
+order by 1,2,3,4) 
+group by 1,2,3,4,5
+),
+
+T3 as (Select T2.period as Period, T2.geo_region_id as geo_region_id,T2.vehicle_id, T1.Vehicle_category as vehicle_category,T1.LEVEL0_MAPPING, Sum(T1.Demand) Total_Demand, Sum(Active_Partners) Acitve_Partners,Sum(T2.DAP) As DAP,Sum(T1.Avg_demand)/Sum(T2.DAP) as Demand_per_Dap
+From T1 left join T2
+on T1.order_date = T2.period
+and T1.geo_region_id = T2.geo_region_id
+and T1.Vehicle_category = T2.Vehicle_category
+and T1.vehicle_id = T2.vehicle_id
+group by 1,2,3,4,5
+)
+
+
+Select date_trunc({{Period}},Period) as Start_Date, Sum(total_demand) as orders ,
+Sum(Acitve_Partners) as Active_Partners,
+Sum(DAP) as Avg_DAP ,Avg(Demand_per_dap) as Order_Per_DAP
+From 
+T3
+left join trucks.GEO_REGIONS_ROI g
+on g.id = t3.GEO_REGION_ID
+Where LEVEL0_MAPPING = 'Micro LCV'
+[[and tier_Status ={{Tier}}]]
+[[AND geo_region_id in ({{geo_region_id}})]]
+[[and vehicle_id in ({{vehicle_id}})]]
+group by 1
+order by 1;
